@@ -1,46 +1,69 @@
 // SPDX-License-Identifier: MIT
+
 pragma solidity ^0.8.0;
 
-contract Escrow {
+contract ClinicFundingEscrow {
     // Участники сделки
-    address public payer; // Лицо, вносящее средства
-    address public payee; // Лицо, получающее средства
-    address public arbiter; // Арбитр (может подтвердить или отклонить выплату)
-    uint public amount; // Сумма сделки
+    address public investor; // Лицо, вносящее средства (инвестор)
+    address public clinicRecipient; // Клиника, получающая средства
+    address public fundingArbiter; // Арбитр, проверяющий условия сделки
+    uint public tokenAmount; // Количество токенов для сделки
+    uint public tokenPrice; // Стоимость одного токена в wei
+    uint public fundingDeadline; // Дедлайн для завершения сделки
 
+    // Сумма сделки в wei
+    uint public totalAmount;
+    
     // Статус сделки
-    bool public isFundsReleased = false;
+    bool public isFundingReleased = false;
 
     // События
-    event FundsDeposited(address indexed from, uint amount);
-    event FundsReleased(address indexed to, uint amount);
+    event TokensDeposited(address indexed from, uint amount);
+    event TokensReleased(address indexed to, uint amount);
+    event TokensRefunded(address indexed to, uint amount);
 
     // Конструктор для создания контракта
-    constructor(address _payee, address _arbiter) payable {
-        require(msg.value > 0, "Must send some Ether to initialize the contract");
-        payer = msg.sender;
-        payee = _payee;
-        arbiter = _arbiter;
-        amount = msg.value;
+    constructor(address _clinicRecipient, address _fundingArbiter, uint _fundingDeadline, uint _tokenAmount, uint _tokenPrice) {
+        require(_tokenAmount > 0, "Token amount must be greater than zero");
+        require(_tokenPrice > 0, "Token price must be greater than zero");
+        require(_fundingDeadline > block.timestamp, "Deadline must be in the future");
+
+        investor = msg.sender;
+        clinicRecipient = _clinicRecipient;
+        fundingArbiter = _fundingArbiter;
+        tokenAmount = _tokenAmount;
+        tokenPrice = _tokenPrice;
+        totalAmount = tokenAmount * tokenPrice;
+        fundingDeadline = _fundingDeadline;
     }
 
     // Функция для подтверждения арбитром
-    function releaseFunds() public {
-        require(msg.sender == arbiter, "Only arbiter can release funds");
-        require(!isFundsReleased, "Funds already released");
+    function releaseTokens() public {
+        require(msg.sender == fundingArbiter, "Only arbiter can release tokens");
+        require(!isFundingReleased, "Tokens already released");
+        require(block.timestamp <= fundingDeadline, "Cannot release tokens after the deadline");
 
-        isFundsReleased = true;
-        payable(payee).transfer(amount);
-
-        emit FundsReleased(payee, amount);
+        isFundingReleased = true;
+        emit TokensReleased(clinicRecipient, tokenAmount);
     }
 
-    // Функция для возврата средств (в случае отмены)
-    function refund() public {
-        require(msg.sender == arbiter, "Only arbiter can refund");
-        require(!isFundsReleased, "Funds already released");
+    // Функция для возврата токенов до дедлайна
+    function refundBeforeDeadline() public {
+        require(msg.sender == fundingArbiter, "Only arbiter can refund");
+        require(!isFundingReleased, "Tokens already released");
+        require(block.timestamp <= fundingDeadline, "Deadline has passed");
 
-        isFundsReleased = true;
-        payable(payer).transfer(amount);
+        isFundingReleased = true;
+        emit TokensRefunded(investor, tokenAmount);
+    }
+
+    // Функция для возврата токенов после дедлайна
+    function refundAfterDeadline() public {
+        require(msg.sender == fundingArbiter || msg.sender == investor, "Only arbiter or investor can refund after deadline");
+        require(!isFundingReleased, "Tokens already released");
+        require(block.timestamp > fundingDeadline, "Deadline has not passed yet");
+
+        isFundingReleased = true;
+        emit TokensRefunded(investor, tokenAmount);
     }
 }
